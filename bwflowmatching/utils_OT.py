@@ -1,10 +1,117 @@
 import ott # type: ignore
 from ott.solvers import linear # type: ignore
+import jax.numpy as jnp
+
+def lower_tri_to_square(v, n):
+    """
+    :meta private:
+    """
+
+    idx = jnp.tril_indices(n)
+    mat = jnp.zeros((n, n), dtype=v.dtype).at[idx].set(v)
+    mat = mat + mat.T - jnp.diag(jnp.diag(mat))
+    return mat
+
+def matrix_sqrt(A):
+    """
+    Compute the matrix square root using eigendecomposition.
+    
+    Args:
+    A: A symmetric positive definite matrix
+    
+    Returns:
+    The matrix square root of A
+    """
+    eigenvalues, eigenvectors = jnp.linalg.eigh(A)
+    return eigenvectors @ jnp.diag(jnp.sqrt(eigenvalues)) @ eigenvectors.T
+
+def gaussian_monge_map(Nx, Ny):
+    """
+    Compute the Gaussian Monge map from N(mu_x, sigma_x) to N(mu_y, sigma_y).
+    
+    Args:
+    Nx: Mean and covariance of the source distribution (shape: (d,))
+    Ny: Mean and covariance of the target distribution (shape: (d,))
+
+    Returns:
+    Parameters for function T(x) that maps points from the source to the target distribution
+    """
+    
+    # Compute A = sigma_y^(1/2) (sigma_y^(1/2) sigma_x sigma_y^(1/2))^(-1/2) sigma_y^(1/2)
+    
+    mu_x, sigma_x = Nx
+    mu_y, sigma_y = Ny
+
+    sigma_y_sqrt = matrix_sqrt(sigma_y)
+    inner_sqrt = matrix_sqrt(sigma_y_sqrt @ sigma_x @ sigma_y_sqrt.T)
+
+    
+    # Compute A
+    A = sigma_y_sqrt @ jnp.linalg.inv(inner_sqrt) @ sigma_y_sqrt.T
+    b = mu_y - A @ mu_x
+    # Define the Monge map function
+    return A,b
+
+def mccann_interpolation(Nx, T, t):
+
+    
+    mu_x, sigma_x = Nx
+    A, b = T
+
+    d = mu_x.shape[0]
+    Iden = jnp.eye(d)
+
+    mu_t = (1 - t) * mu_x + t * (A @ mu_x + b)
+    M = (1 - t) * Iden + t * A
+    sigma_t = M @ sigma_x @ M.T
+    
+    return mu_t, sigma_t
+
+def mcann_derivative(Nx, T, t):
+ 
+    mu_x, sigma_x = Nx
+    A, b = T
+
+    d = mu_x.shape[0]
+    Iden = jnp.eye(d)
+
+    mu_t_dot = (A-Iden) @ mu_x + b
+    sigma_t_dot = (A-Iden) @ sigma_x @ ((1-t) * Iden + t * A).T + ((1-t) * Iden + t * A) @ sigma_x @ (A-Iden).T
+    
+    return mu_t_dot, sigma_t_dot
 
 
+def frechet_distance(Nx, Ny):
+    """
+    Compute the Fréchet distance between two Gaussian distributions.
+    
+    Args:
+    Nx: Mean and covariance of the source distribution (shape: (d,))
+    Ny: Mean and covariance of the target distribution (shape: (d,))
+
+    Returns:
+    The Fréchet distance between the two distributions
+    """
+    mu_x, sigma_x = Nx
+    mu_y, sigma_y = Ny
+
+    mean_diff_squared = jnp.sum((mu_x - mu_y)**2)
+    
+    # Compute the sum of the square roots of the eigenvalues of sigma_x @ sigma_y
+    sigma_x_sqrt =matrix_sqrt(sigma_x)
+    product = sigma_x_sqrt @ sigma_y @ sigma_x_sqrt
+    eigenvalues = jnp.linalg.eigvalsh(product)
+    trace_term = jnp.sum(jnp.sqrt(jnp.maximum(eigenvalues, 0)))  # Ensure non-negative
+    
+    # Compute the trace of the sum of covariances
+    trace_sum = jnp.trace(sigma_x + sigma_y)
+    
+    # Compute the Fréchet distance
+    return(mean_diff_squared + trace_sum - 2 * trace_term)
+    
 
 
-def ot_mat_from_distance(distance_matrix, eps = 0.1, lse_mode = False): #produces deltas from x to y
+def sinkhorn_from_distance(distance_matrix, eps = 0.1, lse_mode = False): #produces deltas from x to y
 
 
     ot_solve = linear.solve(
@@ -13,37 +120,3 @@ def ot_mat_from_distance(distance_matrix, eps = 0.1, lse_mode = False): #produce
         min_iterations = 0,
         max_iterations = 100)
     return(ot_solve.matrix)
-
-
-def ot_mat(pc_x, pc_y, eps = 0.1, lse_mode = False): #produces deltas from x to y
-
-    
-    pc_x, w_x = pc_x[0], pc_x[1]
-    pc_y, w_y = pc_y[0], pc_y[1]
-
-    ot_solve = linear.solve(
-        ott.geometry.pointcloud.PointCloud(pc_x, pc_y, cost_fn=None, epsilon = eps, scale_cost = 'mean'),
-        a = w_x,
-        b = w_y,
-        lse_mode = lse_mode,
-        min_iterations = 0,
-        max_iterations = 100)
-    return(ot_solve.reg_ot_cost)
-
-def transport_plan(pc_x, pc_y, eps = 0.001, lse_mode = True): #produces deltas from x to y
-
-    
-    pc_x, w_x = pc_x[0], pc_x[1]
-    pc_y, w_y = pc_y[0], pc_y[1]
-
-    ot_solve = linear.solve(
-        ott.geometry.pointcloud.PointCloud(pc_x, pc_y, cost_fn=None, epsilon = eps),
-        a = w_x,
-        b = w_y,
-        lse_mode = lse_mode,
-        min_iterations = 0,
-        max_iterations = 100)
-    
-    potentials = ot_solve.to_dual_potentials()
-    delta = potentials.transport(pc_x)-pc_x
-    return(delta)
