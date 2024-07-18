@@ -2,8 +2,10 @@ import jax  # type: ignore
 import jax.numpy as jnp  # type: ignore
 import jax.random as random  # type: ignore
 from flax import linen as nn  # type: ignore
+import tensorflow_probability.substrates.jax.math as jax_prob # type: ignore
 
 from wassersteinflowmatching.DefaultConfig import DefaultConfig
+
 
 class FeedForward(nn.Module):
     """Transformer MLP / feed-forward block.
@@ -15,13 +17,21 @@ class FeedForward(nn.Module):
     config: DefaultConfig
 
     @nn.compact
-    def __call__(self, inputs):
+    def __call__(self, inputs, deterministic = True, dropout_rng=random.key(0)):
         config = self.config
+        
         mlp_hidden_dim = config.mlp_hidden_dim
+        # dropout_rate = config.dropout_rate
 
         x = nn.Dense(features = mlp_hidden_dim)(inputs)
         x = nn.relu(x)
-        output = nn.Dense(inputs.shape[-1])(x) + inputs
+        # x = nn.Dropout(
+        #     rate = dropout_rate,
+        #     deterministic = deterministic,
+        #     rng = dropout_rng,
+        # )(x)
+        x = nn.Dense(inputs.shape[-1])(x) + inputs
+        output = nn.LayerNorm()(x)
         return output
 
 
@@ -39,13 +49,14 @@ class BuresWassersteinNN(nn.Module):
 
         space_dim = means.shape[-1]
 
+        cov_tril = jax_prob.fill_triangular_inverse(covariances)
 
         means_emb = nn.Dense(features = embedding_dim)(means)
-        covariances_emb = nn.Dense(features = embedding_dim)(jnp.tril(covariances))
-        t_emb = nn.Dense(features = embedding_dim)(t[:, None, None])
+        covariances_emb = nn.Dense(features = embedding_dim)(cov_tril)
+        t_emb = nn.Dense(features = embedding_dim)(t[:, None])
 
         x = means_emb + covariances_emb + t_emb
-
+        
         if(labels is not None):
             l_emb = nn.Dense(features = embedding_dim)(jax.nn.one_hot(labels, config.label_dim)[:, None, :])
             x = x + l_emb
@@ -57,11 +68,8 @@ class BuresWassersteinNN(nn.Module):
         
         tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(x)
 
-        idx = jnp.tril_indices(space_dim)
-        covariance_chol = jnp.zeros((space_dim, space_dim), dtype=tril_vec.dtype).at[idx].set(tril_vec)
-        covariance_chol = covariance_chol + covariance_chol.T - jnp.diag(jnp.diag(covariance_chol))
-        
-        covariance = covariance_chol @ covariance_chol.T
+        covariance_chol = jax_prob.fill_triangular(tril_vec)
+        covariance = jnp.matmul(covariance_chol, jnp.transpose(covariance_chol, [0,2,1]))/space_dim
 
         return mean, covariance
 

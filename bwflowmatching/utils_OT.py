@@ -1,6 +1,7 @@
 import ott # type: ignore
 from ott.solvers import linear # type: ignore
 import jax.numpy as jnp
+import jax 
 
 def lower_tri_to_square(v, n):
     """
@@ -23,6 +24,7 @@ def matrix_sqrt(A):
     The matrix square root of A
     """
     eigenvalues, eigenvectors = jnp.linalg.eigh(A)
+    eigenvalues = jax.nn.relu(eigenvalues)
     return eigenvectors @ jnp.diag(jnp.sqrt(eigenvalues)) @ eigenvectors.T
 
 def gaussian_monge_map(Nx, Ny):
@@ -47,7 +49,7 @@ def gaussian_monge_map(Nx, Ny):
 
     
     # Compute A
-    A = sigma_y_sqrt @ jnp.linalg.inv(inner_sqrt) @ sigma_y_sqrt.T
+    A = sigma_y_sqrt @ jnp.linalg.pinv(inner_sqrt) @ sigma_y_sqrt.T
     b = mu_y - A @ mu_x
     # Define the Monge map function
     return A,b

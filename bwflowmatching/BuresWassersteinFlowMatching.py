@@ -8,11 +8,11 @@ from jax import jit, random# type: ignore
 from tqdm import trange, tqdm # type: ignore
 from flax.training import train_state # type: ignore
 
-import wassersteinflowmatching.utils_OT as utils_OT # type: ignore
-import wassersteinflowmatching.utils_Noise as utils_Noise # type: ignore
-import wassersteinflowmatching.utils_Pointclouds as utils_Pointclouds # type: ignore
-from wassersteinflowmatching._utils_Neural import BuresWassersteinNN # type: ignore
-from wassersteinflowmatching.DefaultConfig import DefaultConfig # type: ignore
+import bwflowmatching.utils_OT as utils_OT # type: ignore
+import bwflowmatching.utils_Noise as utils_Noise # type: ignore
+import bwflowmatching.utils_Pointclouds as utils_Pointclouds # type: ignore
+from bwflowmatching._utils_Neural import BuresWassersteinNN # type: ignore
+from bwflowmatching.DefaultConfig import DefaultConfig # type: ignore
 
 
 
@@ -35,9 +35,9 @@ class BuresWassersteinFlowMatching:
         self,
         point_clouds: list = None,
         means: np.array = None,
-        covarainces: np.array = None,
+        covariances: np.array = None,
         labels: np.array =  None,
-        noise_type: str =  'normal',
+        noise_type: str =  'gaussian',
         config = DefaultConfig,
     ):
 
@@ -47,9 +47,9 @@ class BuresWassersteinFlowMatching:
 
 
         if(point_clouds is not None):
-            self.means, self.covarainces = utils_Pointclouds.calc_mean_and_cov(point_clouds, minval = -1, maxval = 1)
+            self.means, self.covariances = utils_Pointclouds.calc_mean_and_cov(point_clouds, minval = -1, maxval = 1)
         else:
-            self.means, self.covarainces = means, covarainces
+            self.means, self.covariances = means, covariances
 
 
         self.space_dim = self.means.shape[-1]
@@ -59,11 +59,6 @@ class BuresWassersteinFlowMatching:
         self.mccann_interpolation_jit = jax.jit(jax.vmap(utils_OT.mccann_interpolation, (0, 0, 0), 0))
         self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.mcann_derivative, (0, 0, 0), 0))
 
-        self.scaling = config.scaling
-        self.factor = config.factor
-        self.point_clouds = self.scale_func(self.point_clouds) * self.factor
-        self.max_val, self.min_val = self.point_clouds.max(), self.point_clouds.min()
-
         self.noise_type = noise_type
         self.noise_func = getattr(utils_Noise, self.noise_type)
 
@@ -71,7 +66,7 @@ class BuresWassersteinFlowMatching:
 
         if(self.mini_batch_ot_mode):
             self.frechet_dist_jit = jax.jit(
-                jax.vmap(utils_OT.frechet_distance, (0, 0, None, None), 0),
+                jax.vmap(utils_OT.frechet_distance, (0, 0), 0),
                 static_argnums=[2, 3],
             )
             self.minibatch_ot_eps = config.minibatch_ot_eps
@@ -94,32 +89,31 @@ class BuresWassersteinFlowMatching:
         """
 
         subkey, key = random.split(key)
-        attn_inputs =  self.noise_func(size = [10, self.point_clouds[0].shape[0], self.space_dim], 
-                                       minval = self.min_val, 
-                                       maxval = self.max_val, key = subkey)
+        means_noise, covariances_noise = self.noise_func(size = 10, dimention = self.space_dim, key = subkey)
         
         subkey, key = random.split(key)
-
+        
         if(self.labels is not None):
             params = model.init(rngs={"params": subkey}, 
-                                point_cloud = attn_inputs, 
-                                t = jnp.ones((attn_inputs.shape[0])), 
-                                masks = jnp.ones((attn_inputs.shape[0], attn_inputs.shape[1])),
-                                labels =  jnp.ones((attn_inputs.shape[0])),
+                                means = means_noise, 
+                                covariances = covariances_noise,
+                                t = jnp.ones((means_noise.shape[0])), 
+                                labels =  jnp.ones((means_noise.shape[0])),
                                 deterministic = True)['params']
         else:
             params = model.init(rngs={"params": subkey}, 
-                    point_cloud = attn_inputs, 
-                    t = jnp.ones((attn_inputs.shape[0])), 
-                    masks = jnp.ones((attn_inputs.shape[0], attn_inputs.shape[1])),
-                    deterministic = True)['params']
+                                means = means_noise, 
+                                covariances = covariances_noise,
+                                t = jnp.ones((means_noise.shape[0])), 
+                                deterministic = True)['params']
 
         lr_sched = optax.exponential_decay(
             learning_rate, decay_steps, 0.6, staircase = True,
         )
+        #lr_sched = learning_rate
         tx = optax.adam(lr_sched)  #
 
-        return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+        return train_state.TrainState.create(apply_fn= model.apply, params=params, tx=tx)
 
 
     @partial(jit, static_argnums=(0,))
@@ -178,9 +172,10 @@ class BuresWassersteinFlowMatching:
                                             labels = labels_batch,
                                             deterministic = False, 
                                             dropout_rng = subkey)
-            mean_error  = np.mean(np.square(predicted_mean_dot - interpolates_means_dot))
-            cov_error  = np.mean(np.square(predicted_cov_dot - interpolates_covariances_dot))
-            return mean_error + cov_error
+            mean_error  = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
+            cov_error  = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
+            loss = mean_error/self.space_dim + cov_error
+            return loss
         
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
         state = state.apply_gradients(grads=grads)
@@ -214,23 +209,23 @@ class BuresWassersteinFlowMatching:
         subkey, key = random.split(key)
 
         self.FlowMatchingModel = BuresWassersteinNN(config = self.config)
-        self.state = self.create_train_state(self.FlowMatchingModel, 
+        self.state = self.create_train_state(model = self.FlowMatchingModel,
                                              learning_rate=init_lr, 
                                              decay_steps = int(training_steps / decay_num), 
                                              key = subkey)
 
 
         tq = trange(training_steps, leave=True, desc="")
-        losses = []
+        self.losses = []
         for training_step in tq:
 
             subkey, key = random.split(key, 2)
             batch_ind = random.choice(
                 key=subkey,
-                a = self.point_clouds.shape[0],
+                a = self.means.shape[0],
                 shape=[batch_size])
             
-            means_batch, covariances_batch = self.means[batch_ind],  self.covarainces[batch_ind]
+            means_batch, covariances_batch = self.means[batch_ind],  self.covariances[batch_ind]
 
             subkey, key = random.split(key, 2)
             if(self.labels is not None):
@@ -238,7 +233,7 @@ class BuresWassersteinFlowMatching:
             else:
                 labels_batch = None
             self.state, loss = self.train_step(self.state, means_batch, covariances_batch, labels_batch, key = subkey)
-            losses.append(loss) 
+            self.losses.append(loss) 
 
             if(training_step % verbose == 0):
                 tq.set_description(": {:.3e}".format(loss))
@@ -250,13 +245,15 @@ class BuresWassersteinFlowMatching:
             means = means[None, :]
             covariances = covariances[None, :]  
 
-        flow = jnp.squeeze(self.FlowMatchingModel.apply({"params": self.state.params},
+        flow_mean, flow_cov = self.FlowMatchingModel.apply({"params": self.state.params},
                     means = means, 
                     covariances = covariances,
                     t = t * jnp.ones(covariances.shape[0]), 
                     labels = labels,
-                    deterministic = True))
-        return(flow)
+                    deterministic = True)
+        flow_mean,flow_cov = jnp.squeeze(flow_mean), jnp.squeeze(flow_cov)
+
+        return([flow_mean, flow_cov])
         
 
     def generate_samples(self, num_samples = 10, timesteps = 100, generate_labels = None, init_noise = None, key = random.key(0)): 

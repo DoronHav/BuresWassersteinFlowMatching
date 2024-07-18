@@ -27,16 +27,11 @@ class DefaultConfig:
     :param kernel_init: (Callable) initializer of kernel weights (default nn.initializers.glorot_uniform())
     :param bias_init: ((Callable) initializer of bias weights (default nn.initializers.zeros_init())
     """ 
-    wasserstein_eps: float = 0.001
-    wasserstein_lse: bool = True
-    mini_batch_ot_mode = True
+    mini_batch_ot_mode = False
     minibatch_ot_eps: float = 0.1
     minibatch_ot_lse: bool = False
-    scaling: str = 'min_max_total'
-    factor: float = 1.0
     embedding_dim: int = 512
     num_layers: int = 6
-    num_heads: int = 4
     dropout_rate: float = 0.1
     mlp_hidden_dim: int = 1024
 
