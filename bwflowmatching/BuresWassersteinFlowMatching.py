@@ -7,6 +7,7 @@ import optax # type: ignore
 from jax import jit, random# type: ignore
 from tqdm import trange, tqdm # type: ignore
 from flax.training import train_state # type: ignore
+import tensorflow_probability.substrates.jax.math as jax_prob # type: ignore
 
 import bwflowmatching.utils_OT as utils_OT # type: ignore
 import bwflowmatching.utils_Noise as utils_Noise # type: ignore
@@ -51,13 +52,17 @@ class BuresWassersteinFlowMatching:
         else:
             self.means, self.covariances = means, covariances
 
+        self.mean_scale =jnp.abs(self.means).mean()
+        self.cov_scale = jnp.diagonal(self.covariances, axis1 = 1, axis2 = 2).mean()
 
         self.space_dim = self.means.shape[-1]
 
 
         self.monge_map_jit = jax.jit(jax.vmap(utils_OT.gaussian_monge_map, (0, 0), 0))
         self.mccann_interpolation_jit = jax.jit(jax.vmap(utils_OT.mccann_interpolation, (0, 0, 0), 0))
-        self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.mcann_derivative, (0, 0, 0), 0))
+        self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.mccann_derivative, (0, 0, 0), 0))
+
+        self.psd_project_jit = jax.jit(jax.vmap(utils_OT.project_to_psd, 0, 0))
 
         self.noise_type = noise_type
         self.noise_func = getattr(utils_Noise, self.noise_type)
@@ -67,7 +72,6 @@ class BuresWassersteinFlowMatching:
         if(self.mini_batch_ot_mode):
             self.frechet_dist_jit = jax.jit(
                 jax.vmap(utils_OT.frechet_distance, (0, 0), 0),
-                static_argnums=[2, 3],
             )
             self.minibatch_ot_eps = config.minibatch_ot_eps
             self.minibatch_ot_lse = config.minibatch_ot_lse
@@ -89,7 +93,7 @@ class BuresWassersteinFlowMatching:
         """
 
         subkey, key = random.split(key)
-        means_noise, covariances_noise = self.noise_func(size = 10, dimention = self.space_dim, key = subkey)
+        means_noise, covariances_noise = self.noise_func(size = 10, dimention = self.space_dim, mean_scale = self.mean_scale, cov_scale = self.cov_scale, key = subkey)
         
         subkey, key = random.split(key)
         
@@ -127,18 +131,20 @@ class BuresWassersteinFlowMatching:
 
         # compute pairwise ot between point clouds and noise:
 
-        ot_matrix = utils_OT.lower_tri_to_square(self.frechet_dist_jit(
-                    [means_batch[tri_u_ind[:, 0]], covariances_batch[tri_u_ind[:, 0]]],
-                    [means_noise[tri_u_ind[:, 1]], covariances_noise[tri_u_ind[:, 1]]],
-                    self.minibatch_ot_eps,
-                    self.minibatch_ot_lse,
-                ), n = means_batch.shape[0])
+        ot_matrix = jax_prob.fill_triangular(self.frechet_dist_jit(
+                                            [means_batch[tri_u_ind[:, 0]], covariances_batch[tri_u_ind[:, 0]]],
+                                            [means_noise[tri_u_ind[:, 1]], covariances_noise[tri_u_ind[:, 1]]],
+                                            ))
+        ot_matrix = ot_matrix + ot_matrix.T - jnp.diag(jnp.diag(ot_matrix))
 
-        pairing_matrix = utils_OT.ot_mat_from_distance(ot_matrix, self.minibatch_ot_eps, self.minibatch_ot_lse)
-        
+        pairing_matrix = utils_OT.sinkhorn_from_distance(ot_matrix, self.minibatch_ot_eps, self.minibatch_ot_lse)
+        pairing_matrix = pairing_matrix/pairing_matrix.sum(axis = 1)
+
         subkey, key = random.split(key)
         noise_ind = random.categorical(subkey, logits = jnp.log(pairing_matrix + 0.000001))
         return(noise_ind)
+    
+
 
     @partial(jit, static_argnums=(0,))
     def train_step(self, state, means_batch, covariances_batch, labels_batch = None, key=random.key(0)):
@@ -147,13 +153,14 @@ class BuresWassersteinFlowMatching:
         """
         subkey_t, subkey_noise, key = random.split(key, 3)
         
-        means_noise, covariances_noise = self.noise_func(size = means_batch.shape[0], dimention = self.space_dim, key = subkey_noise)
+        means_noise, covariances_noise = self.noise_func(size = means_batch.shape[0], dimention = self.space_dim, mean_scale = self.mean_scale, cov_scale = self.cov_scale, key = subkey_noise)
 
         if(self.mini_batch_ot_mode):
             subkey_resample, key = random.split(key)
             noise_ind = self.minibatch_ot(means_batch, covariances_batch, means_noise, covariances_noise, key = subkey_resample)
             means_noise = means_noise[noise_ind]
             covariances_noise = covariances_noise[noise_ind]
+
 
         interpolates_time = random.uniform(subkey_t, (means_batch.shape[0],), minval=0.0, maxval=1.0)
         
@@ -172,9 +179,9 @@ class BuresWassersteinFlowMatching:
                                             labels = labels_batch,
                                             deterministic = False, 
                                             dropout_rng = subkey)
-            mean_error  = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
-            cov_error  = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
-            loss = mean_error/self.space_dim + cov_error
+            mean_error = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
+            cov_error = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
+            loss = mean_error/self.space_dim + cov_error 
             return loss
         
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
@@ -284,14 +291,15 @@ class BuresWassersteinFlowMatching:
                 init_noise = init_noise[None, :, :]
             generated_samples = [init_noise]
         else:
-            generated_samples =  [self.noise_func(size = num_samples, dimention = self.space_dim, key = subkey)]
+            generated_samples =  [self.noise_func(size = num_samples, dimention = self.space_dim, mean_scale = self.mean_scale, cov_scale = self.cov_scale, key = subkey)]
 
+        
 
         dt = 1/timesteps
 
         for t in tqdm(jnp.linspace(1, 0, timesteps)):
             grad_fn = self.get_flow(generated_samples[-1][0], generated_samples[-1][1], t, generate_labels)
-            generated_samples.append([generated_samples[-1][0] + dt * grad_fn[0], generated_samples[-1][1] + dt * grad_fn[1]])
+            generated_samples.append([generated_samples[-1][0] + dt * grad_fn[0], self.psd_project_jit(generated_samples[-1][1] + dt * grad_fn[1])])
         if(generate_labels is None):
             return generated_samples
         return generated_samples, [self.num_to_label[label] for label in np.array(generate_labels)]

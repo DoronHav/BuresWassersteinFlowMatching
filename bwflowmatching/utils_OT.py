@@ -3,15 +3,18 @@ from ott.solvers import linear # type: ignore
 import jax.numpy as jnp
 import jax 
 
-def lower_tri_to_square(v, n):
+def project_to_psd(matrix):
     """
-    :meta private:
+    Project a matrix to the nearest positive semidefinite matrix.
+    
+    Args:
+    matrix: A square matrix
+    
+    Returns:
+    The nearest positive semidefinite matrix to the input matrix
     """
-
-    idx = jnp.tril_indices(n)
-    mat = jnp.zeros((n, n), dtype=v.dtype).at[idx].set(v)
-    mat = mat + mat.T - jnp.diag(jnp.diag(mat))
-    return mat
+    eigenvalues, eigenvectors = jnp.linalg.eigh(matrix)
+    return eigenvectors @ jnp.diag(jnp.maximum(eigenvalues, 0)) @ eigenvectors.T
 
 def matrix_sqrt(A):
     """
@@ -69,7 +72,7 @@ def mccann_interpolation(Nx, T, t):
     
     return mu_t, sigma_t
 
-def mcann_derivative(Nx, T, t):
+def mccann_derivative(Nx, T, t):
  
     mu_x, sigma_x = Nx
     A, b = T

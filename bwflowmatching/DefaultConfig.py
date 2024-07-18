@@ -27,9 +27,9 @@ class DefaultConfig:
     :param kernel_init: (Callable) initializer of kernel weights (default nn.initializers.glorot_uniform())
     :param bias_init: ((Callable) initializer of bias weights (default nn.initializers.zeros_init())
     """ 
-    mini_batch_ot_mode = False
-    minibatch_ot_eps: float = 0.1
-    minibatch_ot_lse: bool = False
+    mini_batch_ot_mode = True
+    minibatch_ot_eps: float = 0.001
+    minibatch_ot_lse: bool = True
     embedding_dim: int = 512
     num_layers: int = 6
     dropout_rate: float = 0.1

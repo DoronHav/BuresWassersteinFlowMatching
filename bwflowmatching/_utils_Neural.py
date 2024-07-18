@@ -64,14 +64,14 @@ class BuresWassersteinNN(nn.Module):
         for _ in range(num_layers):
             x = FeedForward(config)(inputs = x, deterministic = deterministic, dropout_rng = dropout_rng)
 
-        mean = nn.Dense(space_dim)(x)
+        mean_dot = nn.Dense(space_dim)(x)
         
         tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(x)
+        lower_triangular = jax_prob.fill_triangular(tril_vec)
 
-        covariance_chol = jax_prob.fill_triangular(tril_vec)
-        covariance = jnp.matmul(covariance_chol, jnp.transpose(covariance_chol, [0,2,1]))/space_dim
+        covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
 
-        return mean, covariance
+        return mean_dot, covariance_dot
 
 
 
