@@ -46,6 +46,7 @@ class BuresWassersteinNN(nn.Module):
 
         embedding_dim = config.embedding_dim
         num_layers = config.num_layers
+        gradient = config.gradient
 
         space_dim = means.shape[-1]
 
@@ -68,8 +69,11 @@ class BuresWassersteinNN(nn.Module):
         
         tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(x)
         lower_triangular = jax_prob.fill_triangular(tril_vec)
-
-        covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
+        if(gradient == 'riemannian'):
+            #covariance_dot = jnp.matmul(lower_triangular, jnp.triu(lower_triangular.transpose([0,2,1]), k=1))
+            covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
+        else:
+            covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
 
         return mean_dot, covariance_dot
 

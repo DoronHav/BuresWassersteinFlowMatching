@@ -14,7 +14,8 @@ def project_to_psd(matrix):
     The nearest positive semidefinite matrix to the input matrix
     """
     eigenvalues, eigenvectors = jnp.linalg.eigh(matrix)
-    return eigenvectors @ jnp.diag(jnp.maximum(eigenvalues, 0)) @ eigenvectors.T
+    eigen_scale = jnp.mean(jnp.abs(eigenvalues))
+    return eigenvectors @ jnp.diag(jnp.maximum(eigenvalues, 1e-4 * eigen_scale)) @ eigenvectors.T
 
 def matrix_sqrt(A):
     """
@@ -84,6 +85,21 @@ def mccann_derivative(Nx, T, t):
     sigma_t_dot = (A-Iden) @ sigma_x @ ((1-t) * Iden + t * A).T + ((1-t) * Iden + t * A) @ sigma_x @ (A-Iden).T
     
     return mu_t_dot, sigma_t_dot
+
+def riemann_derivativea(Nx, T, t):
+ 
+    mu_x, sigma_x = Nx
+    A, b = T
+
+    d = mu_x.shape[0]
+    Iden = jnp.eye(d)
+
+    mu_t_dot = (A-Iden) @ mu_x + b
+    sigma_t_dot = (A - Iden) @ jnp.linalg.inv((1-t) * Iden + t * A)
+    
+    return mu_t_dot, sigma_t_dot
+
+
 
 
 def frechet_distance(Nx, Ny):

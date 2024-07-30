@@ -27,6 +27,7 @@ class DefaultConfig:
     :param kernel_init: (Callable) initializer of kernel weights (default nn.initializers.glorot_uniform())
     :param bias_init: ((Callable) initializer of bias weights (default nn.initializers.zeros_init())
     """ 
+    gradient: str = 'riemannian'
     mini_batch_ot_mode = True
     minibatch_ot_eps: float = 0.001
     minibatch_ot_lse: bool = True

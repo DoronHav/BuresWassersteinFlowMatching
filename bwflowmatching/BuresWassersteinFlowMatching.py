@@ -58,11 +58,16 @@ class BuresWassersteinFlowMatching:
         self.space_dim = self.means.shape[-1]
 
 
+
         self.monge_map_jit = jax.jit(jax.vmap(utils_OT.gaussian_monge_map, (0, 0), 0))
         self.mccann_interpolation_jit = jax.jit(jax.vmap(utils_OT.mccann_interpolation, (0, 0, 0), 0))
-        self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.mccann_derivative, (0, 0, 0), 0))
 
-        self.psd_project_jit = jax.jit(jax.vmap(utils_OT.project_to_psd, 0, 0))
+        self.gradient = self.config.gradient
+        if(self.gradient == 'riemannian'):
+            self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.riemann_derivative, (0, 0, 0), 0))
+        else:
+            self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.mccann_derivative, (0, 0, 0), 0))
+            self.psd_project_jit = jax.jit(jax.vmap(utils_OT.project_to_psd, 0, 0))
 
         self.noise_type = noise_type
         self.noise_func = getattr(utils_Noise, self.noise_type)
@@ -182,7 +187,7 @@ class BuresWassersteinFlowMatching:
             mean_error = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
             cov_error = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
             loss = mean_error/self.space_dim + cov_error 
-            return loss
+            return loss/self.loss_rescale
         
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
         state = state.apply_gradients(grads=grads)
@@ -194,6 +199,7 @@ class BuresWassersteinFlowMatching:
         batch_size=16,
         verbose=8,
         init_lr=0.0001,
+        loss_rescale = 10,
         decay_num=4,
         key=random.key(0),
     ):
@@ -221,6 +227,7 @@ class BuresWassersteinFlowMatching:
                                              decay_steps = int(training_steps / decay_num), 
                                              key = subkey)
 
+        self.loss_rescale = loss_rescale
 
         tq = trange(training_steps, leave=True, desc="")
         self.losses = []
@@ -299,7 +306,17 @@ class BuresWassersteinFlowMatching:
 
         for t in tqdm(jnp.linspace(1, 0, timesteps)):
             grad_fn = self.get_flow(generated_samples[-1][0], generated_samples[-1][1], t, generate_labels)
-            generated_samples.append([generated_samples[-1][0] + dt * grad_fn[0], self.psd_project_jit(generated_samples[-1][1] + dt * grad_fn[1])])
+
+            mu_t = generated_samples[-1][0] + dt * grad_fn[0]
+
+            if(self.gradient == 'riemannian'):
+                sigma_update =  jnp.eye(self.space_dim)[None, :, :] + dt * grad_fn[1]
+                sigma_t =  jnp.matmul(jnp.matmul(sigma_update, generated_samples[-1][1]), sigma_update.transpose([0, 2, 1]))
+            else:
+                sigma_update =  generated_samples[-1][1] + dt * grad_fn[1] 
+                sigma_t = self.psd_project_jit(sigma_update)
+
+            generated_samples.append([mu_t, sigma_t])
         if(generate_labels is None):
             return generated_samples
         return generated_samples, [self.num_to_label[label] for label in np.array(generate_labels)]
