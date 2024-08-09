@@ -59,7 +59,7 @@ class BuresWassersteinNN(nn.Module):
         x = means_emb + covariances_emb + t_emb
         
         if(labels is not None):
-            l_emb = nn.Dense(features = embedding_dim)(jax.nn.one_hot(labels, config.label_dim)[:, None, :])
+            l_emb = nn.Dense(features = embedding_dim)(jax.nn.one_hot(labels, config.label_dim))
             x = x + l_emb
 
         for _ in range(num_layers):

@@ -86,7 +86,7 @@ def mccann_derivative(Nx, T, t):
     
     return mu_t_dot, sigma_t_dot
 
-def riemann_derivativea(Nx, T, t):
+def riemann_derivative(Nx, T, t):
  
     mu_x, sigma_x = Nx
     A, b = T
@@ -95,10 +95,9 @@ def riemann_derivativea(Nx, T, t):
     Iden = jnp.eye(d)
 
     mu_t_dot = (A-Iden) @ mu_x + b
-    sigma_t_dot = (A - Iden) @ jnp.linalg.inv((1-t) * Iden + t * A)
+    sigma_t_dot = (A - Iden) @ jnp.linalg.pinv((1-t) * Iden + t * A)
     
     return mu_t_dot, sigma_t_dot
-
 
 
 
@@ -119,7 +118,7 @@ def frechet_distance(Nx, Ny):
     mean_diff_squared = jnp.sum((mu_x - mu_y)**2)
     
     # Compute the sum of the square roots of the eigenvalues of sigma_x @ sigma_y
-    sigma_x_sqrt =matrix_sqrt(sigma_x)
+    sigma_x_sqrt = matrix_sqrt(sigma_x)
     product = sigma_x_sqrt @ sigma_y @ sigma_x_sqrt
     eigenvalues = jnp.linalg.eigvalsh(product)
     trace_term = jnp.sum(jnp.sqrt(jnp.maximum(eigenvalues, 0)))  # Ensure non-negative
@@ -130,6 +129,18 @@ def frechet_distance(Nx, Ny):
     # Compute the Fréchet distance
     return(mean_diff_squared + trace_sum - 2 * trace_term)
     
+# def tangent_norm(pred_dot, true_dot, Nt):
+#     pred_mu_dot, pred_sigma_dot = pred_dot
+#     true_mu_dot, true_sigma_dot = true_dot
+
+#     mu_t, sigma_t = Nt
+
+#     mean_diff_squared = jnp.sum((pred_mu_dot - true_mu_dot)**2)
+
+#     sigma_norm = jnp.trace()
+
+
+
 
 
 def sinkhorn_from_distance(distance_matrix, eps = 0.1, lse_mode = False): #produces deltas from x to y

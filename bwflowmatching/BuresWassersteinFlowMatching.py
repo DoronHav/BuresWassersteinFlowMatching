@@ -52,8 +52,9 @@ class BuresWassersteinFlowMatching:
         else:
             self.means, self.covariances = means, covariances
 
-        self.mean_scale =jnp.abs(self.means).mean()
+        self.mean_scale = jnp.abs(self.means).mean() * self.config.mean_scale_factor
         self.cov_scale = jnp.diagonal(self.covariances, axis1 = 1, axis2 = 2).mean()
+        self.degrees_of_freedom_scale = self.config.degrees_of_freedom_scale
 
         self.space_dim = self.means.shape[-1]
 
@@ -98,7 +99,12 @@ class BuresWassersteinFlowMatching:
         """
 
         subkey, key = random.split(key)
-        means_noise, covariances_noise = self.noise_func(size = 10, dimention = self.space_dim, mean_scale = self.mean_scale, cov_scale = self.cov_scale, key = subkey)
+        means_noise, covariances_noise = self.noise_func(size = 10, 
+                                                         dimention = self.space_dim, 
+                                                         mean_scale = self.mean_scale, 
+                                                         degrees_of_freedom_scale = self.degrees_of_freedom_scale,
+                                                         cov_scale = self.cov_scale, 
+                                                         key = subkey)
         
         subkey, key = random.split(key)
         
@@ -158,7 +164,12 @@ class BuresWassersteinFlowMatching:
         """
         subkey_t, subkey_noise, key = random.split(key, 3)
         
-        means_noise, covariances_noise = self.noise_func(size = means_batch.shape[0], dimention = self.space_dim, mean_scale = self.mean_scale, cov_scale = self.cov_scale, key = subkey_noise)
+        means_noise, covariances_noise = self.noise_func(size = means_batch.shape[0], 
+                                                         dimention = self.space_dim, 
+                                                         mean_scale = self.mean_scale, 
+                                                         degrees_of_freedom_scale = self.degrees_of_freedom_scale,
+                                                         cov_scale = self.cov_scale, 
+                                                         key = subkey_noise)
 
         if(self.mini_batch_ot_mode):
             subkey_resample, key = random.split(key)
@@ -298,7 +309,12 @@ class BuresWassersteinFlowMatching:
                 init_noise = init_noise[None, :, :]
             generated_samples = [init_noise]
         else:
-            generated_samples =  [self.noise_func(size = num_samples, dimention = self.space_dim, mean_scale = self.mean_scale, cov_scale = self.cov_scale, key = subkey)]
+            generated_samples =  [self.noise_func(size = num_samples, 
+                                                  dimention = self.space_dim, 
+                                                  mean_scale = self.mean_scale, 
+                                                  degrees_of_freedom_scale = self.degrees_of_freedom_scale,
+                                                  cov_scale = self.cov_scale, 
+                                                  key = subkey)]
 
         
 
