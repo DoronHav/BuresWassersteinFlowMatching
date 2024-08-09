@@ -4,7 +4,7 @@ import jax.random as random  # type: ignore
 from flax import linen as nn  # type: ignore
 import tensorflow_probability.substrates.jax.math as jax_prob # type: ignore
 
-from wassersteinflowmatching.DefaultConfig import DefaultConfig
+from bwflowmatching.DefaultConfig import DefaultConfig
 
 
 class FeedForward(nn.Module):
