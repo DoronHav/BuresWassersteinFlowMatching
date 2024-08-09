@@ -52,13 +52,14 @@ class BuresWassersteinFlowMatching:
         else:
             self.means, self.covariances = means, covariances
 
+        self.noise_type = noise_type
+        self.noise_func = getattr(utils_Noise, self.noise_type)
+
         self.mean_scale = jnp.abs(self.means).mean() * self.config.mean_scale_factor
         self.cov_scale = jnp.diagonal(self.covariances, axis1 = 1, axis2 = 2).mean()
         self.degrees_of_freedom_scale = self.config.degrees_of_freedom_scale
 
         self.space_dim = self.means.shape[-1]
-
-
 
         self.monge_map_jit = jax.jit(jax.vmap(utils_OT.gaussian_monge_map, (0, 0), 0))
         self.mccann_interpolation_jit = jax.jit(jax.vmap(utils_OT.mccann_interpolation, (0, 0, 0), 0))
@@ -70,8 +71,12 @@ class BuresWassersteinFlowMatching:
             self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.mccann_derivative, (0, 0, 0), 0))
             self.psd_project_jit = jax.jit(jax.vmap(utils_OT.project_to_psd, 0, 0))
 
-        self.noise_type = noise_type
-        self.noise_func = getattr(utils_Noise, self.noise_type)
+
+        self.loss = self.config.loss
+        if(self.loss == 'tangent'):
+            self.loss_func = jax.jit(jax.vmap(utils_OT.tangent_norm, (0, 0, 0), 0))
+        else:
+            self.loss_func = jax.jit(jax.vmap(utils_OT.euclidean_norm, (0, 0, 0), 0))
 
         self.mini_batch_ot_mode = config.mini_batch_ot_mode
 
@@ -195,10 +200,15 @@ class BuresWassersteinFlowMatching:
                                             labels = labels_batch,
                                             deterministic = False, 
                                             dropout_rng = subkey)
-            mean_error = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
-            cov_error = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
-            loss = mean_error/self.space_dim + cov_error 
-            return loss/self.loss_rescale
+            
+            
+            # mean_error = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
+            # cov_error = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
+            # loss = mean_error/self.space_dim + cov_error 
+            loss = jnp.mean(self.loss_func([predicted_mean_dot, predicted_cov_dot], 
+                                  [interpolates_means_dot, interpolates_covariances_dot],
+                                  [interpolates_means, interpolates_covariances]))
+            return loss/(self.space_dim**2)
         
         loss, grads = jax.value_and_grad(loss_fn)(state.params)
         state = state.apply_gradients(grads=grads)
@@ -210,7 +220,6 @@ class BuresWassersteinFlowMatching:
         batch_size=16,
         verbose=8,
         init_lr=0.0001,
-        loss_rescale = 10,
         decay_num=4,
         key=random.key(0),
     ):
@@ -238,7 +247,6 @@ class BuresWassersteinFlowMatching:
                                              decay_steps = int(training_steps / decay_num), 
                                              key = subkey)
 
-        self.loss_rescale = loss_rescale
 
         tq = trange(training_steps, leave=True, desc="")
         self.losses = []

@@ -129,16 +129,26 @@ def frechet_distance(Nx, Ny):
     # Compute the Fréchet distance
     return(mean_diff_squared + trace_sum - 2 * trace_term)
     
-# def tangent_norm(pred_dot, true_dot, Nt):
-#     pred_mu_dot, pred_sigma_dot = pred_dot
-#     true_mu_dot, true_sigma_dot = true_dot
 
-#     mu_t, sigma_t = Nt
+def euclidean_norm(pred_dot, true_dot, Nt):
+    pred_mu_dot, pred_sigma_dot = pred_dot
+    true_mu_dot, true_sigma_dot = true_dot
 
-#     mean_diff_squared = jnp.sum((pred_mu_dot - true_mu_dot)**2)
+    mean_diff_squared = jnp.sum((pred_mu_dot - true_mu_dot)**2)
+    sigma_norm = jnp.sum((pred_sigma_dot - true_sigma_dot)**2)
 
-#     sigma_norm = jnp.trace()
+    return mean_diff_squared + sigma_norm
+def tangent_norm(pred_dot, true_dot, Nt):
+    pred_mu_dot, pred_sigma_dot = pred_dot
+    true_mu_dot, true_sigma_dot = true_dot
 
+    mu_t, sigma_t = Nt
+
+    mean_diff_squared = jnp.sum((pred_mu_dot - true_mu_dot)**2)
+
+    sigma_norm = jnp.trace(sigma_t @ (pred_sigma_dot - true_sigma_dot) @ (pred_sigma_dot - true_sigma_dot))
+
+    return mean_diff_squared + sigma_norm
 
 
 

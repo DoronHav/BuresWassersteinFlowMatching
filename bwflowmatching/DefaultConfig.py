@@ -31,11 +31,12 @@ class DefaultConfig:
     mean_scale_factor: float = 1.0
     gradient: str = 'riemannian'
     flow_path: str = 'diffusion'
+    loss: str = 'tangent'
+    architecture: str = 'separate'
     mini_batch_ot_mode = True
     minibatch_ot_eps: float = 0.001
     minibatch_ot_lse: bool = True
     embedding_dim: int = 512
     num_layers: int = 6
-    dropout_rate: float = 0.1
     mlp_hidden_dim: int = 1024
 

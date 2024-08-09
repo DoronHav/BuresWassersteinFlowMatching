@@ -34,6 +34,41 @@ class FeedForward(nn.Module):
         output = nn.LayerNorm()(x)
         return output
 
+class InputMeanCovarianceNN(nn.Module):
+
+    config: DefaultConfig
+
+    @nn.compact
+    def __call__(self, means, covariances, t,  labels = None, deterministic = True, dropout_rng=random.key(0)):
+        config = self.config
+
+        embedding_dim = config.embedding_dim
+        num_layers = config.num_layers
+
+        freqs = jnp.arange(embedding_dim//2) 
+
+        cov_tril = jax_prob.fill_triangular_inverse(covariances)
+
+        means_emb = nn.Dense(features = embedding_dim)(means)
+        covariances_emb = nn.Dense(features = embedding_dim)(cov_tril)
+
+        t_freq = freqs[None, :] * t[:, None]
+        t_four = jnp.concatenate([jnp.cos(t_freq), jnp.sin(t_freq)], axis = -1)
+
+        t_emb = nn.Dense(features = embedding_dim)(t_four)
+
+        x = jnp.concat([means_emb, covariances_emb, t_emb], axis = -1)
+
+        #means_emb + covariances_emb + t_emb
+        
+        if(labels is not None):
+            l_emb = nn.Dense(features = embedding_dim)(jax.nn.one_hot(labels, config.label_dim))
+            x = jnp.concatenate([x, l_emb], axis = -1)
+
+        for _ in range(num_layers):
+            x = FeedForward(config)(inputs = x, deterministic = deterministic, dropout_rng = dropout_rng)
+
+        return(x)
 
 class BuresWassersteinNN(nn.Module):
 
@@ -43,42 +78,28 @@ class BuresWassersteinNN(nn.Module):
     def __call__(self, means, covariances, t,  labels = None, deterministic = True, dropout_rng=random.key(0)):
         
         config = self.config
-
-        embedding_dim = config.embedding_dim
-        num_layers = config.num_layers
-        gradient = config.gradient
+        architecture = config.architecture
 
         space_dim = means.shape[-1]
 
-        cov_tril = jax_prob.fill_triangular_inverse(covariances)
 
-        means_emb = nn.Dense(features = embedding_dim)(means)
-        covariances_emb = nn.Dense(features = embedding_dim)(cov_tril)
-        t_emb = nn.Dense(features = embedding_dim)(t[:, None])
+        if(architecture == 'separate'):
+              
+            mean_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)  
+            sigma_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)  
 
-        x = means_emb + covariances_emb + t_emb
-        
-        if(labels is not None):
-            l_emb = nn.Dense(features = embedding_dim)(jax.nn.one_hot(labels, config.label_dim))
-            x = x + l_emb
+            mean_dot = nn.Dense(space_dim)(mean_dot_emb)
+            tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(sigma_dot_emb)
 
-        for _ in range(num_layers):
-            x = FeedForward(config)(inputs = x, deterministic = deterministic, dropout_rng = dropout_rng)
-
-        mean_dot = nn.Dense(space_dim)(x)
-        
-        tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(x)
-        lower_triangular = jax_prob.fill_triangular(tril_vec)
-        if(gradient == 'riemannian'):
-            #covariance_dot = jnp.matmul(lower_triangular, jnp.triu(lower_triangular.transpose([0,2,1]), k=1))
-            covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
         else:
-            covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
+            dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)
+
+            mean_dot = nn.Dense(space_dim)(dot_emb)
+            tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(dot_emb)
+
+        lower_triangular = jax_prob.fill_triangular(tril_vec)
+        covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)
 
         return mean_dot, covariance_dot
 
 
-
-
-
-    
