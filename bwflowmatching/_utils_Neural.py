@@ -25,11 +25,6 @@ class FeedForward(nn.Module):
 
         x = nn.Dense(features = mlp_hidden_dim)(inputs)
         x = nn.relu(x)
-        # x = nn.Dropout(
-        #     rate = dropout_rate,
-        #     deterministic = deterministic,
-        #     rng = dropout_rng,
-        # )(x)
         x = nn.Dense(inputs.shape[-1])(x) + inputs
         output = nn.LayerNorm()(x)
         return output
@@ -89,13 +84,13 @@ class BuresWassersteinNN(nn.Module):
             sigma_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)  
 
             mean_dot = nn.Dense(space_dim)(mean_dot_emb)
-            tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(sigma_dot_emb)
+            tril_vec = nn.Dense((space_dim * (space_dim + 1)) // 2)(sigma_dot_emb)
 
         else:
             dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)
 
             mean_dot = nn.Dense(space_dim)(dot_emb)
-            tril_vec = nn.Dense(space_dim * (space_dim + 1) // 2)(dot_emb)
+            tril_vec = nn.Dense((space_dim * (space_dim + 1)) // 2)(dot_emb)
 
         lower_triangular = jax_prob.fill_triangular(tril_vec)
         covariance_dot = lower_triangular + jnp.triu(lower_triangular.transpose([0,2,1]), k=1)

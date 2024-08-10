@@ -7,7 +7,6 @@ import optax # type: ignore
 from jax import jit, random# type: ignore
 from tqdm import trange, tqdm # type: ignore
 from flax.training import train_state # type: ignore
-import tensorflow_probability.substrates.jax.math as jax_prob # type: ignore
 
 import bwflowmatching.utils_OT as utils_OT # type: ignore
 import bwflowmatching.utils_Noise as utils_Noise # type: ignore
@@ -56,15 +55,17 @@ class BuresWassersteinFlowMatching:
         self.noise_func = getattr(utils_Noise, self.noise_type)
 
         self.mean_scale = jnp.abs(self.means).mean() * self.config.mean_scale_factor
-        self.cov_scale = jnp.diagonal(self.covariances, axis1 = 1, axis2 = 2).mean()
+        self.cov_scale = jnp.diagonal(self.covariances, axis1 = 1, axis2 = 2).mean() * self.config.cov_scale_factor
         self.degrees_of_freedom_scale = self.config.degrees_of_freedom_scale
 
         self.space_dim = self.means.shape[-1]
+        self.cov_loss_scale = self.config.cov_loss_scale
 
         self.monge_map_jit = jax.jit(jax.vmap(utils_OT.gaussian_monge_map, (0, 0), 0))
         self.mccann_interpolation_jit = jax.jit(jax.vmap(utils_OT.mccann_interpolation, (0, 0, 0), 0))
 
         self.gradient = self.config.gradient
+
         if(self.gradient == 'riemannian'):
             self.mccann_derivative_jit = jax.jit(jax.vmap(utils_OT.riemann_derivative, (0, 0, 0), 0))
         else:
@@ -73,6 +74,7 @@ class BuresWassersteinFlowMatching:
 
 
         self.loss = self.config.loss
+
         if(self.loss == 'tangent'):
             self.loss_func = jax.jit(jax.vmap(utils_OT.tangent_norm, (0, 0, 0), 0))
         else:
@@ -142,16 +144,15 @@ class BuresWassersteinFlowMatching:
         """
         :meta private:
         """
-            
-        tri_u_ind = jnp.stack(jnp.triu_indices(means_batch.shape[0]), axis=1)
+
+        matrix_ind = jnp.array(np.meshgrid(np.arange(means_batch.shape[0]), np.arange(means_noise.shape[0]))).T.reshape(-1, 2)
+
 
         # compute pairwise ot between point clouds and noise:
 
-        ot_matrix = jax_prob.fill_triangular(self.frechet_dist_jit(
-                                            [means_batch[tri_u_ind[:, 0]], covariances_batch[tri_u_ind[:, 0]]],
-                                            [means_noise[tri_u_ind[:, 1]], covariances_noise[tri_u_ind[:, 1]]],
-                                            ))
-        ot_matrix = ot_matrix + ot_matrix.T - jnp.diag(jnp.diag(ot_matrix))
+        ot_matrix = self.frechet_dist_jit([means_batch[matrix_ind[:, 0]], covariances_batch[matrix_ind[:, 0]]],
+                                          [means_noise[matrix_ind[:, 1]], covariances_noise[matrix_ind[:, 1]]])
+        ot_matrix =  ot_matrix.reshape(means_batch.shape[0], means_noise.shape[0])
 
         pairing_matrix = utils_OT.sinkhorn_from_distance(ot_matrix, self.minibatch_ot_eps, self.minibatch_ot_lse)
         pairing_matrix = pairing_matrix/pairing_matrix.sum(axis = 1)
@@ -205,9 +206,11 @@ class BuresWassersteinFlowMatching:
             # mean_error = jnp.mean(jnp.square(predicted_mean_dot - interpolates_means_dot))
             # cov_error = jnp.mean(jnp.square(predicted_cov_dot - interpolates_covariances_dot))
             # loss = mean_error/self.space_dim + cov_error 
-            loss = jnp.mean(self.loss_func([predicted_mean_dot, predicted_cov_dot], 
-                                  [interpolates_means_dot, interpolates_covariances_dot],
-                                  [interpolates_means, interpolates_covariances]))
+            mean_loss, cov_loss = self.loss_func([predicted_mean_dot, predicted_cov_dot], 
+                                                [interpolates_means_dot, interpolates_covariances_dot],
+                                                [interpolates_means, interpolates_covariances])
+                            
+            loss = jnp.mean(mean_loss)/self.cov_loss_scale + jnp.mean(cov_loss)
             return loss/(self.space_dim**2)
         
         loss, grads = jax.value_and_grad(loss_fn)(state.params)

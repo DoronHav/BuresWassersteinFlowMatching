@@ -27,8 +27,10 @@ class DefaultConfig:
     :param kernel_init: (Callable) initializer of kernel weights (default nn.initializers.glorot_uniform())
     :param bias_init: ((Callable) initializer of bias weights (default nn.initializers.zeros_init())
     """ 
-    degrees_of_freedom_scale: float = 2.0
+    degrees_of_freedom_scale: float = 5.0
     mean_scale_factor: float = 1.0
+    cov_scale_factor: float = 1.0
+    cov_loss_scale: float = 1.0
     gradient: str = 'riemannian'
     flow_path: str = 'diffusion'
     loss: str = 'tangent'
@@ -39,4 +41,3 @@ class DefaultConfig:
     embedding_dim: int = 512
     num_layers: int = 6
     mlp_hidden_dim: int = 1024
-

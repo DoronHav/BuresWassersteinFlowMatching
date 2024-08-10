@@ -137,7 +137,8 @@ def euclidean_norm(pred_dot, true_dot, Nt):
     mean_diff_squared = jnp.sum((pred_mu_dot - true_mu_dot)**2)
     sigma_norm = jnp.sum((pred_sigma_dot - true_sigma_dot)**2)
 
-    return mean_diff_squared + sigma_norm
+    return mean_diff_squared, sigma_norm
+
 def tangent_norm(pred_dot, true_dot, Nt):
     pred_mu_dot, pred_sigma_dot = pred_dot
     true_mu_dot, true_sigma_dot = true_dot
@@ -148,7 +149,7 @@ def tangent_norm(pred_dot, true_dot, Nt):
 
     sigma_norm = jnp.trace(sigma_t @ (pred_sigma_dot - true_sigma_dot) @ (pred_sigma_dot - true_sigma_dot))
 
-    return mean_diff_squared + sigma_norm
+    return mean_diff_squared, sigma_norm
 
 
 
