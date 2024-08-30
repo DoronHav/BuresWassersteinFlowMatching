@@ -1,6 +1,5 @@
 import jax  # type: ignore
 import jax.numpy as jnp  # type: ignore
-import jax.random as random  # type: ignore
 from flax import linen as nn  # type: ignore
 import tensorflow_probability.substrates.jax.math as jax_prob # type: ignore
 
@@ -17,24 +16,27 @@ class FeedForward(nn.Module):
     config: DefaultConfig
 
     @nn.compact
-    def __call__(self, inputs, deterministic = True, dropout_rng=random.key(0)):
+    def __call__(self, inputs, deterministic = True, skip_connection = True, layer_norm = True):
         config = self.config
         
         mlp_hidden_dim = config.mlp_hidden_dim
-        # dropout_rate = config.dropout_rate
+        dropout_rate = config.dropout_rate
 
         x = nn.Dense(features = mlp_hidden_dim)(inputs)
+        x = nn.Dropout(dropout_rate, deterministic=deterministic)(x)
         x = nn.relu(x)
-        x = nn.Dense(inputs.shape[-1])(x) + inputs
-        output = nn.LayerNorm()(x)
-        return output
+        if(skip_connection):
+            x = nn.Dense(inputs.shape[-1])(x) + inputs
+        if(layer_norm):
+            x = nn.LayerNorm()(x)
+        return x
 
 class InputMeanCovarianceNN(nn.Module):
 
     config: DefaultConfig
 
     @nn.compact
-    def __call__(self, means, covariances, t,  labels = None, deterministic = True, dropout_rng=random.key(0)):
+    def __call__(self, means, covariances, t,  labels = None, deterministic = True):
         config = self.config
 
         embedding_dim = config.embedding_dim
@@ -52,7 +54,7 @@ class InputMeanCovarianceNN(nn.Module):
 
         t_emb = nn.Dense(features = embedding_dim)(t_four)
 
-        x = jnp.concat([means_emb, covariances_emb, t_emb], axis = -1)
+        x = jnp.concatenate([means_emb, covariances_emb, t_emb], axis = -1)
 
         #means_emb + covariances_emb + t_emb
         
@@ -61,7 +63,7 @@ class InputMeanCovarianceNN(nn.Module):
             x = jnp.concatenate([x, l_emb], axis = -1)
 
         for _ in range(num_layers):
-            x = FeedForward(config)(inputs = x, deterministic = deterministic, dropout_rng = dropout_rng)
+            x = FeedForward(config)(inputs = x, deterministic = deterministic, skip_connection = True, layer_norm = True)
 
         return(x)
 
@@ -70,7 +72,7 @@ class BuresWassersteinNN(nn.Module):
     config: DefaultConfig
 
     @nn.compact
-    def __call__(self, means, covariances, t,  labels = None, deterministic = True, dropout_rng=random.key(0)):
+    def __call__(self, means, covariances, t,  labels = None, deterministic = True):
         
         config = self.config
         architecture = config.architecture
@@ -80,14 +82,20 @@ class BuresWassersteinNN(nn.Module):
 
         if(architecture == 'separate'):
               
-            mean_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)  
-            sigma_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)  
+            mean_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic)  
+            sigma_dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic)  
+
+            mean_dot_emb = FeedForward(config)(inputs = mean_dot_emb, deterministic = deterministic, skip_connection = False, layer_norm = False)
+            sigma_dot_emb = FeedForward(config)(inputs = sigma_dot_emb, deterministic = deterministic, skip_connection = False, layer_norm = False)
 
             mean_dot = nn.Dense(space_dim)(mean_dot_emb)
             tril_vec = nn.Dense((space_dim * (space_dim + 1)) // 2)(sigma_dot_emb)
 
         else:
-            dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic, dropout_rng)
+
+            dot_emb = InputMeanCovarianceNN(config)(means, covariances, t, labels, deterministic)
+            dot_emb = FeedForward(config)(inputs = dot_emb, deterministic = deterministic, skip_connection = False, layer_norm = False)
+
 
             mean_dot = nn.Dense(space_dim)(dot_emb)
             tril_vec = nn.Dense((space_dim * (space_dim + 1)) // 2)(dot_emb)

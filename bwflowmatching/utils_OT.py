@@ -27,6 +27,7 @@ def matrix_sqrt(A):
     Returns:
     The matrix square root of A
     """
+    A = (A + A.T) / 2  # Ensure symmetry
     eigenvalues, eigenvectors = jnp.linalg.eigh(A)
     eigenvalues = jax.nn.relu(eigenvalues)
     return eigenvectors @ jnp.diag(jnp.sqrt(eigenvalues)) @ eigenvectors.T
@@ -137,7 +138,7 @@ def euclidean_norm(pred_dot, true_dot, Nt):
     mean_diff_squared = jnp.sum((pred_mu_dot - true_mu_dot)**2)
     sigma_norm = jnp.sum((pred_sigma_dot - true_sigma_dot)**2)
 
-    return mean_diff_squared, sigma_norm
+    return mean_diff_squared, sigma_norm/pred_sigma_dot.shape[-1]
 
 def tangent_norm(pred_dot, true_dot, Nt):
     pred_mu_dot, pred_sigma_dot = pred_dot
@@ -151,14 +152,9 @@ def tangent_norm(pred_dot, true_dot, Nt):
 
     return mean_diff_squared, sigma_norm
 
-
-
-
-def sinkhorn_from_distance(distance_matrix, eps = 0.1, lse_mode = False): #produces deltas from x to y
-
-
+def ot_mat_from_distance(distance_matrix, eps = 0.1, lse_mode = False): 
     ot_solve = linear.solve(
-        ott.geometry.geometry.Geometry(cost_matrix = distance_matrix, epsilon = eps, scale_cost = 'mean'),
+        ott.geometry.geometry.Geometry(cost_matrix = distance_matrix, epsilon = eps),
         lse_mode = lse_mode,
         min_iterations = 0,
         max_iterations = 100)

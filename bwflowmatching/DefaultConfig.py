@@ -41,3 +41,5 @@ class DefaultConfig:
     embedding_dim: int = 512
     num_layers: int = 6
     mlp_hidden_dim: int = 1024
+    dropout_rate: float = 0.1
+    
