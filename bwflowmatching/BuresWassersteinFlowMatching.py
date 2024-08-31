@@ -59,8 +59,8 @@ class BuresWassersteinFlowMatching:
 
 
         self.noise_config = types.SimpleNamespace()
-        self.matched_noise = matched_noise
-        
+        self.mini_batch_ot_mode = config.mini_batch_ot_mode
+
         if(noise_means is None):
             self.noise_type = noise_type
             self.noise_func = getattr(utils_Noise, self.noise_type)
@@ -68,10 +68,15 @@ class BuresWassersteinFlowMatching:
             self.noise_config.mean_scale = jnp.std(self.means) * self.config.mean_scale_factor
             self.noise_config.cov_scale = jnp.diagonal(self.covariances, axis1 = 1, axis2 = 2).mean() * self.config.cov_scale_factor
             self.noise_config.degrees_of_freedom_scale = self.config.degrees_of_freedom_scale
+            self.matched_noise = False
         else:
             self.noise_func = utils_Noise.sampled_mean_and_cov
             self.noise_config.noise_means = noise_means
             self.noise_config.noise_covariances = noise_covariances
+            self.matched_noise = matched_noise
+            
+        if(self.matched_noise):
+            self.mini_batch_ot_mode = False
 
         
         self.space_dim = self.means.shape[-1]
@@ -98,7 +103,7 @@ class BuresWassersteinFlowMatching:
         else:
             self.loss_func = jax.jit(jax.vmap(utils_OT.euclidean_norm, (0, 0, 0), 0))
 
-        self.mini_batch_ot_mode = config.mini_batch_ot_mode
+        
 
 
         if(labels is not None):
@@ -264,6 +269,12 @@ class BuresWassersteinFlowMatching:
                                              key = subkey)
 
 
+        if(batch_size>=self.means.shape[0]):
+            batch_size = self.means.shape[0]
+            replace = False
+        else:
+            replace = True
+
         tq = trange(training_steps, leave=True, desc="")
         self.losses = []
         for training_step in tq:
@@ -272,7 +283,8 @@ class BuresWassersteinFlowMatching:
             batch_ind = random.choice(
                 key=subkey,
                 a = self.means.shape[0],
-                shape=[batch_size])
+                shape=[batch_size],
+                replace=replace)
             
             means_batch, covariances_batch = self.means[batch_ind],  self.covariances[batch_ind]
 
@@ -364,7 +376,7 @@ class BuresWassersteinFlowMatching:
 
         dt = 1/timesteps
 
-        for t in tqdm(jnp.linspace(1, 0, timesteps)):
+        for t in tqdm(jnp.linspace(1, 0, timesteps)[:-1]):
             grad_fn = self.get_flow(generated_samples[-1][0], generated_samples[-1][1], t, generate_labels)
 
             mu_t = generated_samples[-1][0] + dt * grad_fn[0]

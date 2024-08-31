@@ -18,12 +18,19 @@ def sampled_mean_and_cov(batch_size, noise_config, key = random.key(0)):
     noise_means = noise_config.noise_means
     noise_covariances = noise_config.noise_covariances
 
+    if(batch_size>=noise_means.shape[0]):
+        batch_size = noise_means.shape[0]
+        replace = False
+    else:
+        replace = True
+
     ind_key, key = random.split(key)
     
     noise_inds = random.choice(
                 key=ind_key,
                 a = noise_means.shape[0],
-                shape=[batch_size])
+                shape=[batch_size],
+                replace=replace)
     
     sampled_means = jnp.take(noise_means, noise_inds, axis=0)
     sampled_covariances = jnp.take(noise_covariances, noise_inds, axis=0)
