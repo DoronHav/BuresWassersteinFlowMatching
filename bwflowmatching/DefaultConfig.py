@@ -36,7 +36,7 @@ class DefaultConfig:
     loss: str = 'tangent'
     architecture: str = 'separate'
     mini_batch_ot_mode = True
-    minibatch_ot_eps: float = 0.001
+    minibatch_ot_eps: float = 0.01
     minibatch_ot_lse: bool = True
     embedding_dim: int = 512
     num_layers: int = 6

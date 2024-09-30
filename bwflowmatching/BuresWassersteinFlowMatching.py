@@ -151,7 +151,7 @@ class BuresWassersteinFlowMatching:
                                 deterministic = True)['params']
 
         lr_sched = optax.exponential_decay(
-            learning_rate, decay_steps, 0.97, staircase = True,
+            learning_rate, decay_steps, 0.97, staircase = False,
         )
 
         #lr_sched = learning_rate
@@ -177,11 +177,8 @@ class BuresWassersteinFlowMatching:
                                           [means_noise[matrix_ind[:, 1]], covariances_noise[matrix_ind[:, 1]]])
         ot_matrix =  ot_matrix.reshape(means_batch.shape[0], means_noise.shape[0])
 
-        pairing_matrix = utils_OT.ot_mat_from_distance(ot_matrix, self.minibatch_ot_eps, self.minibatch_ot_lse)
-        pairing_matrix = pairing_matrix/pairing_matrix.sum(axis = 1)
 
-        subkey, key = random.split(key)
-        noise_ind = random.categorical(subkey, logits = jnp.log(pairing_matrix + 0.000001))
+        noise_ind = utils_OT.ot_mat_from_distance(ot_matrix, self.minibatch_ot_eps, self.minibatch_ot_lse)
         return(noise_ind)
     
 
